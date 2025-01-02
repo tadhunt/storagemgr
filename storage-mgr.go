@@ -309,10 +309,10 @@ func (sm *StorageManager) DeleteUpload(ctx context.Context, requestUID string, u
 	return nil
 }
 
-func (sm *StorageManager) UploadStateHandler(ctx context.Context, requestUID string, uploadID string, state string) error {
-	isValidState := validUploadStatesFromClient[state]
+func (sm *StorageManager) SetUploadState(ctx context.Context, requestUID string, uploadID string, newState string) error {
+	isValidState := validUploadStatesFromClient[newState]
 	if !isValidState {
-		return sm.log.ErrFmt("unsupported state: '%s'", state)
+		return sm.log.ErrFmt("unsupported state: '%s'", newState)
 	}
 
 	dbpath := fmt.Sprintf("uploads/%s/%s", requestUID, uploadID)
@@ -323,7 +323,7 @@ func (sm *StorageManager) UploadStateHandler(ctx context.Context, requestUID str
 			return sm.log.ErrFmt("bad dval type, expected *Upload")
 		}
 
-		u.State = state
+		u.State = newState
 		u.LastUpdate = time.Now()
 
 		return nil
