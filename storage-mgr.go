@@ -2,6 +2,7 @@ package storagemgr
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -221,12 +222,17 @@ func (sm *StorageManager) NewUploadURL(ctx context.Context, requestUID string, r
 	sm.log.Infof("bucket %s object %s", sm.uploadBucket, oname)
 	sm.log.Infof("uploadEmail %s uploadKey %s", sm.uploadEmail, sm.uploadKey)
 
+	key, err := sm.getPrivateKey(sm.uploadKey)
+	if err != nil {
+		return nil, fmt.Errorf("bad key")
+	}
+
 	now := time.Now()
 	options := &storage.SignedURLOptions{
 		Scheme:         storage.SigningSchemeV4,
 		Method:         "PUT",
 		GoogleAccessID: sm.uploadEmail,
-		PrivateKey:     sm.uploadKey,
+		PrivateKey:     key,
 		Expires:        now.Add(10 * time.Minute),
 		Headers: []string{
 			"Content-Length: " + strconv.FormatInt(int64(request.Size), 10),
@@ -263,6 +269,34 @@ func (sm *StorageManager) NewUploadURL(ctx context.Context, requestUID string, r
 	sm.log.Infof("Upload State: %v", upload)
 
 	return response, nil
+}
+
+type Key struct {
+	Type                    string `json:"type"`
+	ProjectID               string `json:"project_id"`
+	PrivateKeyId            string `json:"private_key_id"`
+	PrivateKey              string `json:"private_key"`
+	ClientEmail             string `json:"client_email"`
+	ClientID                string `json:"client_id"`
+	AuthURI                 string `json:"auth_uri"`
+	TokenURI                string `json:"token_uri"`
+	AuthProviderX509CertURL string `json:"auth_provider_x509_cert_url"`
+	ClientX509CertURL       string `json:"client_x509_cert_url"`
+	UniverseDomain          string `json:"universe_domain"`
+}
+
+func (sm *StorageManager) getPrivateKey(src []byte) ([]byte, error) {
+	key := &Key{}
+	err := json.Unmarshal(src, key)
+	if err != nil {
+		return nil, err
+	}
+
+	if key.PrivateKey == "" {
+		return nil, sm.log.ErrFmt("empty key")
+	}
+
+	return []byte(key.PrivateKey), nil
 }
 
 func (sm *StorageManager) GetUpload(requestUID string, uploadID string) (*SignedURLResponse, error) {
@@ -350,16 +384,16 @@ func (sm *StorageManager) Read(ctx context.Context, requestUID string, objectID 
 	bucket := client.Bucket(sm.uploadBucket)
 	object := bucket.Object(oname)
 
-        reader, err := object.NewReader(ctx)
-        if err != nil {
-                return sm.log.ErrFmt("create reader %s/%s: %v", sm.uploadBucket, oname, err)
-        }
-        defer reader.Close()
+	reader, err := object.NewReader(ctx)
+	if err != nil {
+		return sm.log.ErrFmt("create reader %s/%s: %v", sm.uploadBucket, oname, err)
+	}
+	defer reader.Close()
 
 	_, err = io.Copy(w, reader)
 	if err != nil {
-                return sm.log.ErrFmt("stream object %s/%s: %v", sm.uploadBucket, oname, err)
-        }
+		return sm.log.ErrFmt("stream object %s/%s: %v", sm.uploadBucket, oname, err)
+	}
 
 	return nil
 }
