@@ -12,6 +12,7 @@ import (
 	"cloud.google.com/go/storage"
 
 	"google.golang.org/api/iterator"
+	"google.golang.org/api/option"
 
 	"github.com/google/uuid"
 	"github.com/tadhunt/fsdb"
@@ -340,7 +341,7 @@ func (sm *StorageManager) SetUploadState(ctx context.Context, uploadID string, n
 func (sm *StorageManager) Read(ctx context.Context, requestUID string, objectID string, w http.ResponseWriter) error {
 	oname := fmt.Sprintf("%s/%s", requestUID, objectID)
 
-	client, err := storage.NewClient(ctx)
+	client, err := storage.NewClient(ctx, option.WithCredentialsJSON(sm.downloadKey))
 	if err != nil {
 		return err
 	}
