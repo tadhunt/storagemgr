@@ -38,10 +38,25 @@ type StorageManager struct {
 	log           logger.CompatLogWriter
 	db            *fsdb.DBConnection
 	downloadEmail string
-	downloadKey   []byte
+	downloadKey   *Key
 	uploadBucket  string
 	uploadEmail   string
-	uploadKey     []byte
+	uploadKey     *Key
+}
+type Key struct {
+	Type                    string `json:"type"`
+	ProjectID               string `json:"project_id"`
+	PrivateKeyId            string `json:"private_key_id"`
+	PrivateKey              string `json:"private_key"`
+	ClientEmail             string `json:"client_email"`
+	ClientID                string `json:"client_id"`
+	AuthURI                 string `json:"auth_uri"`
+	TokenURI                string `json:"token_uri"`
+	AuthProviderX509CertURL string `json:"auth_provider_x509_cert_url"`
+	ClientX509CertURL       string `json:"client_x509_cert_url"`
+	UniverseDomain          string `json:"universe_domain"`
+
+	raw                     []byte
 }
 
 type ObjectInfo struct {
@@ -73,7 +88,7 @@ type UploadStateRequest struct {
 	State string
 }
 
-type Upload struct {
+type File struct {
 	ID         string
 	CreatorID  string
 	SignedURL  string
@@ -81,7 +96,17 @@ type Upload struct {
 	LastUpdate time.Time
 }
 
-func NewStorageManager(log logger.CompatLogWriter, db *fsdb.DBConnection, downloadEmail string, downloadKey []byte, uploadBucket string, uploadEmail string, uploadKey []byte) (*StorageManager, error) {
+func NewStorageManager(log logger.CompatLogWriter, db *fsdb.DBConnection, downloadEmail string, rawDownloadKey []byte, uploadBucket string, uploadEmail string, rawUploadKey []byte) (*StorageManager, error) {
+	downloadKey, err := decodeKey(rawDownloadKey)
+	if err != nil {
+		return nil, err
+	}
+
+	uploadKey, err := decodeKey(rawUploadKey)
+	if err != nil {
+		return nil, err
+	}
+	
 	sm := &StorageManager{
 		log:           log,
 		db:            db,
@@ -95,15 +120,31 @@ func NewStorageManager(log logger.CompatLogWriter, db *fsdb.DBConnection, downlo
 	return sm, nil
 }
 
-func (sm *StorageManager) newDownloadSignedURL(bname string, oname string) (string, error) {
+func decodeKey(src []byte) (*Key, error) {
+	key := &Key{}
+	err := json.Unmarshal(src, key)
+	if err != nil {
+		return nil, err
+	}
+
+	key.raw = src
+
+	return key, nil
+}
+
+func (key *Key) Raw() []byte {
+	return key.raw
+}
+
+func (sm *StorageManager) newDownloadSignedURL(bname string, objectID string) (string, error) {
 	options := &storage.SignedURLOptions{
 		GoogleAccessID: sm.downloadEmail,
-		PrivateKey:     sm.downloadKey,
+		PrivateKey:     []byte(sm.downloadKey.PrivateKey),
 		Method:         "GET",
 		Expires:        time.Now().Add(5 * time.Minute),
 	}
 
-	url, err := storage.SignedURL(bname, oname, options)
+	url, err := storage.SignedURL(bname, objectID, options)
 	if err != nil {
 		return "", err
 	}
@@ -111,10 +152,10 @@ func (sm *StorageManager) newDownloadSignedURL(bname string, oname string) (stri
 	return url, nil
 }
 
-func (sm *StorageManager) NewDownloadURL(bname string, oname string) (*SignedURLResponse, error) {
-	sm.log.Infof("bucket %s object %s", bname, oname)
+func (sm *StorageManager) NewDownloadURL(bname string, objectID string) (*SignedURLResponse, error) {
+	sm.log.Infof("bucket %s object %s", bname, objectID)
 
-	url, err := sm.newDownloadSignedURL(bname, oname)
+	url, err := sm.newDownloadSignedURL(bname, objectID)
 	if err != nil {
 		return nil, err
 	}
@@ -126,9 +167,7 @@ func (sm *StorageManager) NewDownloadURL(bname string, oname string) (*SignedURL
 	return response, nil
 }
 
-func (sm *StorageManager) GetObjectInfo(ctx context.Context, requestUID string, objectID string) (*ObjectInfo, error) {
-	oname := fmt.Sprintf("%s/%s", requestUID, objectID)
-
+func (sm *StorageManager) GetObjectInfo(ctx context.Context, objectID string) (*ObjectInfo, error) {
 	client, err := storage.NewClient(ctx)
 	if err != nil {
 		return nil, err
@@ -136,7 +175,7 @@ func (sm *StorageManager) GetObjectInfo(ctx context.Context, requestUID string, 
 	defer client.Close()
 
 	bucket := client.Bucket(sm.uploadBucket)
-	object := bucket.Object(oname)
+	object := bucket.Object(objectID)
 
 	attrs, err := object.Attrs(ctx)
 	if err != nil {
@@ -208,7 +247,7 @@ func (sm *StorageManager) ListUploads(ctx context.Context, requestUID string) (*
 }
 
 func (sm *StorageManager) NewUploadURL(ctx context.Context, requestUID string, request *NewUploadURLRequest) (*SignedURLResponse, error) {
-	uploadID, err := uuid.NewRandom()
+	objectID, err := uuid.NewRandom()
 	if err != nil {
 		return nil, err
 	}
@@ -217,22 +256,15 @@ func (sm *StorageManager) NewUploadURL(ctx context.Context, requestUID string, r
 		return nil, fmt.Errorf("bad size, expected 1..%d", UPLOAD_MAX_SIZE)
 	}
 
-	oname := fmt.Sprintf("%s/%s", requestUID, uploadID)
-
-	sm.log.Infof("bucket %s object %s", sm.uploadBucket, oname)
+	sm.log.Infof("bucket %s object %s", sm.uploadBucket, objectID)
 	sm.log.Infof("uploadEmail %s uploadKey %s", sm.uploadEmail, sm.uploadKey)
-
-	key, err := sm.getPrivateKey(sm.uploadKey)
-	if err != nil {
-		return nil, fmt.Errorf("bad key")
-	}
 
 	now := time.Now()
 	options := &storage.SignedURLOptions{
 		Scheme:         storage.SigningSchemeV4,
 		Method:         "PUT",
 		GoogleAccessID: sm.uploadEmail,
-		PrivateKey:     key,
+		PrivateKey:     []byte(sm.uploadKey.PrivateKey),
 		Expires:        now.Add(10 * time.Minute),
 		Headers: []string{
 			"Content-Length: " + strconv.FormatInt(int64(request.Size), 10),
@@ -242,25 +274,25 @@ func (sm *StorageManager) NewUploadURL(ctx context.Context, requestUID string, r
 		},
 	}
 
-	url, err := storage.SignedURL(sm.uploadBucket, oname, options)
+	url, err := storage.SignedURL(sm.uploadBucket, objectID.String(), options)
 	if err != nil {
 		return nil, err
 	}
 
 	response := &SignedURLResponse{
 		SignedURL: url,
-		UploadID:  uploadID.String(),
+		UploadID:  objectID.String(),
 	}
 
-	upload := &Upload{
-		ID:         uploadID.String(),
+	upload := &File{
+		ID:         objectID.String(),
 		CreatorID:  requestUID,
 		SignedURL:  url,
 		State:      UPLOAD_STATE_INIT,
 		LastUpdate: now,
 	}
 
-	dbpath := fmt.Sprintf("uploads/%s", uploadID)
+	dbpath := fmt.Sprintf("uploads/%s", objectID)
 	err = sm.db.Add(ctx, dbpath, upload)
 	if err != nil {
 		return nil, err
@@ -271,56 +303,24 @@ func (sm *StorageManager) NewUploadURL(ctx context.Context, requestUID string, r
 	return response, nil
 }
 
-type Key struct {
-	Type                    string `json:"type"`
-	ProjectID               string `json:"project_id"`
-	PrivateKeyId            string `json:"private_key_id"`
-	PrivateKey              string `json:"private_key"`
-	ClientEmail             string `json:"client_email"`
-	ClientID                string `json:"client_id"`
-	AuthURI                 string `json:"auth_uri"`
-	TokenURI                string `json:"token_uri"`
-	AuthProviderX509CertURL string `json:"auth_provider_x509_cert_url"`
-	ClientX509CertURL       string `json:"client_x509_cert_url"`
-	UniverseDomain          string `json:"universe_domain"`
-}
+func (sm *StorageManager) GetUpload(objectID string) (*SignedURLResponse, error) {
+	sm.log.Infof("bucket %s object %s", sm.uploadBucket, objectID)
 
-func (sm *StorageManager) getPrivateKey(src []byte) ([]byte, error) {
-	key := &Key{}
-	err := json.Unmarshal(src, key)
-	if err != nil {
-		return nil, err
-	}
-
-	if key.PrivateKey == "" {
-		return nil, sm.log.ErrFmt("empty key")
-	}
-
-	return []byte(key.PrivateKey), nil
-}
-
-func (sm *StorageManager) GetUpload(requestUID string, uploadID string) (*SignedURLResponse, error) {
-	oname := fmt.Sprintf("%s/%s", requestUID, uploadID)
-
-	sm.log.Infof("bucket %s object %s", sm.uploadBucket, oname)
-
-	u, err := sm.newDownloadSignedURL(sm.uploadBucket, oname)
+	u, err := sm.newDownloadSignedURL(sm.uploadBucket, objectID)
 	if err != nil {
 		return nil, err
 	}
 
 	response := &SignedURLResponse{
 		SignedURL: u,
-		UploadID:  uploadID,
+		UploadID:  objectID,
 	}
 
 	return response, nil
 }
 
-func (sm *StorageManager) DeleteUpload(ctx context.Context, requestUID string, uploadID string) error {
-	oname := fmt.Sprintf("%s/%s", requestUID, uploadID)
-
-	sm.log.Infof("bucket %s object %s", sm.uploadBucket, oname)
+func (sm *StorageManager) DeleteUpload(ctx context.Context, objectID string) error {
+	sm.log.Infof("bucket %s object %s", sm.uploadBucket, objectID)
 
 	client, err := storage.NewClient(ctx)
 	if err != nil {
@@ -330,12 +330,12 @@ func (sm *StorageManager) DeleteUpload(ctx context.Context, requestUID string, u
 
 	bucket := client.Bucket(sm.uploadBucket)
 
-	err = bucket.Object(oname).Delete(ctx)
+	err = bucket.Object(objectID).Delete(ctx)
 	if err != nil {
 		return err
 	}
 
-	dbpath := fmt.Sprintf("uploads/%s", uploadID)
+	dbpath := fmt.Sprintf("uploads/%s", objectID)
 	err = sm.db.Delete(ctx, dbpath)
 	if err != nil {
 		if !fsdb.ErrorIsNotFound(err) {
@@ -353,9 +353,9 @@ func (sm *StorageManager) SetUploadState(ctx context.Context, uploadID string, n
 	}
 
 	dbpath := fmt.Sprintf("uploads/%s", uploadID)
-	upload := &Upload{}
+	upload := &File{}
 	err := sm.db.AtomicUpdate(ctx, dbpath, upload, func(ctx context.Context, dval interface{}) error {
-		u, ok := dval.(*Upload)
+		u, ok := dval.(*File)
 		if !ok {
 			return sm.log.ErrFmt("bad dval type, expected *Upload")
 		}
@@ -372,27 +372,25 @@ func (sm *StorageManager) SetUploadState(ctx context.Context, uploadID string, n
 	return nil
 }
 
-func (sm *StorageManager) Read(ctx context.Context, requestUID string, objectID string, w http.ResponseWriter) error {
-	oname := fmt.Sprintf("%s/%s", requestUID, objectID)
-
-	client, err := storage.NewClient(ctx, option.WithCredentialsJSON(sm.downloadKey))
+func (sm *StorageManager) Read(ctx context.Context, objectID string, w http.ResponseWriter) error {
+	client, err := storage.NewClient(ctx, option.WithCredentialsJSON(sm.downloadKey.Raw()))
 	if err != nil {
 		return err
 	}
 	defer client.Close()
 
 	bucket := client.Bucket(sm.uploadBucket)
-	object := bucket.Object(oname)
+	object := bucket.Object(objectID)
 
 	reader, err := object.NewReader(ctx)
 	if err != nil {
-		return sm.log.ErrFmt("create reader %s/%s: %v", sm.uploadBucket, oname, err)
+		return sm.log.ErrFmt("create reader %s/%s: %v", sm.uploadBucket, objectID, err)
 	}
 	defer reader.Close()
 
 	_, err = io.Copy(w, reader)
 	if err != nil {
-		return sm.log.ErrFmt("stream object %s/%s: %v", sm.uploadBucket, oname, err)
+		return sm.log.ErrFmt("stream object %s/%s: %v", sm.uploadBucket, objectID, err)
 	}
 
 	return nil
