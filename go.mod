@@ -1,4 +1,4 @@
-module storagemgr
+module github.com/tadhunt/storagemgr
 
 go 1.23.4
 

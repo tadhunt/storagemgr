@@ -23,7 +23,7 @@ const (
 	UPLOAD_STATE_SUCCESS = "success"
 	UPLOAD_STATE_DELETED = "deleted"
 
-	UPLOAD_MAX_SIZE = 4 * 1024 * 1024 * 1024 // (2 GiB) Maximum size of uploaded worlds
+	UPLOAD_MAX_SIZE = 4 * 1024 * 1024 * 1024 // (2 GiB) Maximum size of an upload
 )
 
 var validUploadStatesFromClient = map[string]bool{
@@ -47,10 +47,6 @@ type ObjectInfo struct {
 	Name    string
 	Size    string
 	Created time.Time
-}
-
-type ListBackupsResponse struct {
-	Objects []*ObjectInfo
 }
 
 type ListUploadsResponse struct {
@@ -181,42 +177,6 @@ func (sm *StorageManager) GetNewestBackup(ctx context.Context, bname string, opr
 	oinfo := sm.objectAttrsToObjectInfo(newestObj)
 
 	return oinfo, nil
-}
-
-func (sm *StorageManager) ListBackups(ctx context.Context, bname string, oprefix string) (*ListBackupsResponse, error) {
-	client, err := storage.NewClient(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	bucket := client.Bucket(bname)
-
-	query := &storage.Query{
-		Prefix: oprefix,
-	}
-
-	sm.log.Infof("bucket %#v query %#v", bucket, query)
-
-	results := &ListBackupsResponse{
-		Objects: []*ObjectInfo{},
-	}
-
-	it := bucket.Objects(ctx, query)
-	for {
-		attrs, err := it.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-
-		backup := sm.objectAttrsToObjectInfo(attrs)
-
-		results.Objects = append(results.Objects, backup)
-	}
-
-	return results, nil
 }
 
 func (sm *StorageManager) GetObjectInfo(ctx context.Context, rawurl string) (*ObjectInfo, error) {
