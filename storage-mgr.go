@@ -3,6 +3,8 @@ package storagemgr
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"path"
 	"strconv"
 	"time"
@@ -128,6 +130,7 @@ func (sm *StorageManager) GetObjectInfo(ctx context.Context, requestUID string, 
 	if err != nil {
 		return nil, err
 	}
+	defer client.Close()
 
 	bucket := client.Bucket(sm.uploadBucket)
 	object := bucket.Object(oname)
@@ -157,6 +160,7 @@ func (sm *StorageManager) ListUploads(ctx context.Context, requestUID string) (*
 	if err != nil {
 		return nil, err
 	}
+	defer client.Close()
 
 	bucket := client.Bucket(sm.uploadBucket)
 
@@ -285,6 +289,7 @@ func (sm *StorageManager) DeleteUpload(ctx context.Context, requestUID string, u
 	if err != nil {
 		return err
 	}
+	defer client.Close()
 
 	bucket := client.Bucket(sm.uploadBucket)
 
@@ -326,6 +331,32 @@ func (sm *StorageManager) UploadStateHandler(ctx context.Context, requestUID str
 	if err != nil {
 		return err
 	}
+
+	return nil
+}
+
+func (sm *StorageManager) Read(ctx context.Context, requestUID string, objectID string, w http.ResponseWriter) error {
+	oname := fmt.Sprintf("%s/%s", requestUID, objectID)
+
+	client, err := storage.NewClient(ctx)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+
+	bucket := client.Bucket(sm.uploadBucket)
+	object := bucket.Object(oname)
+
+        reader, err := object.NewReader(ctx)
+        if err != nil {
+                return sm.log.ErrFmt("create reader %s/%s: %v", sm.uploadBucket, oname, err)
+        }
+        defer reader.Close()
+
+	_, err = io.Copy(w, reader)
+	if err != nil {
+                return sm.log.ErrFmt("stream object %s/%s: %v", sm.uploadBucket, oname, err)
+        }
 
 	return nil
 }
