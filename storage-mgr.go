@@ -3,10 +3,8 @@ package storagemgr
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"path"
 	"strconv"
-	"strings"
 	"time"
 
 	"cloud.google.com/go/storage"
@@ -123,86 +121,15 @@ func (sm *StorageManager) NewDownloadURL(bname string, oname string) (*SignedURL
 	return response, nil
 }
 
-func (sm *StorageManager) objectAttrsToObjectInfo(obj *storage.ObjectAttrs) *ObjectInfo {
-	name, found := obj.Metadata["file-name"]
-	if !found || name == "" {
-		name = path.Base(obj.Name)
-	}
-
-	oinfo := &ObjectInfo{
-		ID:      path.Base(obj.Name),
-		Name:    name,
-		Size:    fmt.Sprintf("%d", obj.Size),
-		Created: obj.Created,
-	}
-
-	return oinfo
-}
-
-func (sm *StorageManager) GetNewestBackup(ctx context.Context, bname string, oprefix string) (*ObjectInfo, error) {
-	client, err := storage.NewClient(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	bucket := client.Bucket(bname)
-
-	query := &storage.Query{
-		Prefix: oprefix,
-	}
-
-	sm.log.Infof("bucket %#v query %#v", bucket, query)
-
-	var newestObj *storage.ObjectAttrs
-
-	it := bucket.Objects(ctx, query)
-	for {
-		obj, err := it.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-
-		if newestObj == nil || obj.Created.After(newestObj.Created) {
-			newestObj = obj
-		}
-	}
-
-	if newestObj == nil {
-		return nil, sm.log.ErrFmt("no backups")
-	}
-
-	oinfo := sm.objectAttrsToObjectInfo(newestObj)
-
-	return oinfo, nil
-}
-
-func (sm *StorageManager) GetObjectInfo(ctx context.Context, rawurl string) (*ObjectInfo, error) {
-	u, err := url.Parse(rawurl)
-	if err != nil {
-		return nil, err
-	}
-
-	if u.Scheme != "gs" {
-		return nil, sm.log.ErrFmt("got scheme '%s' expected 'gs'", u.Scheme)
-	}
-
-	bname := u.Host
-
-	fields := strings.SplitAfterN(u.Path, "/", 2)
-	if len(fields) != 2 {
-		return nil, sm.log.ErrFmt("got %d fields expected 2 (%#v)", len(fields), fields)
-	}
-	oname := fields[1]
+func (sm *StorageManager) GetObjectInfo(ctx context.Context, requestUID string, objectID string) (*ObjectInfo, error) {
+	oname := fmt.Sprintf("%s/%s", requestUID, objectID)
 
 	client, err := storage.NewClient(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	bucket := client.Bucket(bname)
+	bucket := client.Bucket(sm.uploadBucket)
 	object := bucket.Object(oname)
 
 	attrs, err := object.Attrs(ctx)
