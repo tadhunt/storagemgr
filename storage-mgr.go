@@ -73,6 +73,7 @@ type UploadStateRequest struct {
 
 type Upload struct {
 	ID         string
+	CreatorID  string
 	SignedURL  string
 	State      string
 	LastUpdate time.Time
@@ -246,12 +247,13 @@ func (sm *StorageManager) NewUploadURL(ctx context.Context, requestUID string, r
 
 	upload := &Upload{
 		ID:         uploadID.String(),
+		CreatorID:  requestUID,
 		SignedURL:  url,
 		State:      UPLOAD_STATE_INIT,
 		LastUpdate: now,
 	}
 
-	dbpath := fmt.Sprintf("/uploads/%s/%s", requestUID, uploadID)
+	dbpath := fmt.Sprintf("uploads/%s", uploadID)
 	err = sm.db.Add(ctx, dbpath, upload)
 	if err != nil {
 		return nil, err
@@ -298,7 +300,7 @@ func (sm *StorageManager) DeleteUpload(ctx context.Context, requestUID string, u
 		return err
 	}
 
-	dbpath := fmt.Sprintf("uploads/%s/%s", requestUID, uploadID)
+	dbpath := fmt.Sprintf("uploads/%s", uploadID)
 	err = sm.db.Delete(ctx, dbpath)
 	if err != nil {
 		if !fsdb.ErrorIsNotFound(err) {
@@ -309,13 +311,13 @@ func (sm *StorageManager) DeleteUpload(ctx context.Context, requestUID string, u
 	return nil
 }
 
-func (sm *StorageManager) SetUploadState(ctx context.Context, requestUID string, uploadID string, newState string) error {
+func (sm *StorageManager) SetUploadState(ctx context.Context, uploadID string, newState string) error {
 	isValidState := validUploadStatesFromClient[newState]
 	if !isValidState {
 		return sm.log.ErrFmt("unsupported state: '%s'", newState)
 	}
 
-	dbpath := fmt.Sprintf("uploads/%s/%s", requestUID, uploadID)
+	dbpath := fmt.Sprintf("uploads/%s", uploadID)
 	upload := &Upload{}
 	err := sm.db.AtomicUpdate(ctx, dbpath, upload, func(ctx context.Context, dval interface{}) error {
 		u, ok := dval.(*Upload)
