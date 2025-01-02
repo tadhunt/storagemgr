@@ -14,8 +14,8 @@ import (
 	"google.golang.org/api/iterator"
 
 	"github.com/google/uuid"
-	"github.com/tadhunt/logger"
 	"github.com/tadhunt/fsdb"
+	"github.com/tadhunt/logger"
 )
 
 const (
@@ -33,13 +33,13 @@ var validUploadStatesFromClient = map[string]bool{
 }
 
 type StorageManager struct {
-	log     logger.CompatLogWriter
-	db      *fsdb.DBConnection
+	log           logger.CompatLogWriter
+	db            *fsdb.DBConnection
 	downloadEmail string
 	downloadKey   []byte
-	uploadBucket string
-	uploadEmail  string
-	uploadKey    []byte
+	uploadBucket  string
+	uploadEmail   string
+	uploadKey     []byte
 }
 
 type ObjectInfo struct {
@@ -84,13 +84,13 @@ type Upload struct {
 
 func NewStorageManager(log logger.CompatLogWriter, db *fsdb.DBConnection, downloadEmail string, downloadKey []byte, uploadBucket string, uploadEmail string, uploadKey []byte) (*StorageManager, error) {
 	sm := &StorageManager{
-		log:     log,
-		db:      db,
+		log:           log,
+		db:            db,
 		downloadEmail: downloadEmail,
 		downloadKey:   downloadKey,
-		uploadBucket: uploadBucket,
-		uploadEmail:  uploadEmail,
-		uploadKey:    uploadKey,
+		uploadBucket:  uploadBucket,
+		uploadEmail:   uploadEmail,
+		uploadKey:     uploadKey,
 	}
 
 	return sm, nil
@@ -383,7 +383,7 @@ func (sm *StorageManager) GetUpload(requestUID string, uploadID string) (*Signed
 
 	response := &SignedURLResponse{
 		SignedURL: u,
-		UploadID: uploadID,
+		UploadID:  uploadID,
 	}
 
 	return response, nil
