@@ -37,10 +37,8 @@ var validUploadStatesFromClient = map[string]bool{
 type StorageManager struct {
 	log           logger.CompatLogWriter
 	db            *fsdb.DBConnection
-	downloadEmail string
 	downloadKey   *Key
 	uploadBucket  string
-	uploadEmail   string
 	uploadKey     *Key
 }
 type Key struct {
@@ -110,10 +108,8 @@ func NewStorageManager(log logger.CompatLogWriter, db *fsdb.DBConnection, downlo
 	sm := &StorageManager{
 		log:           log,
 		db:            db,
-		downloadEmail: downloadEmail,
 		downloadKey:   downloadKey,
 		uploadBucket:  uploadBucket,
-		uploadEmail:   uploadEmail,
 		uploadKey:     uploadKey,
 	}
 
@@ -138,7 +134,7 @@ func (key *Key) Raw() []byte {
 
 func (sm *StorageManager) newDownloadSignedURL(bname string, objectID string) (string, error) {
 	options := &storage.SignedURLOptions{
-		GoogleAccessID: sm.downloadEmail,
+		GoogleAccessID: sm.downloadKey.ClientEmail,
 		PrivateKey:     []byte(sm.downloadKey.PrivateKey),
 		Method:         "GET",
 		Expires:        time.Now().Add(5 * time.Minute),
@@ -257,13 +253,13 @@ func (sm *StorageManager) NewUploadURL(ctx context.Context, requestUID string, r
 	}
 
 	sm.log.Infof("bucket %s object %s", sm.uploadBucket, objectID)
-	sm.log.Infof("uploadEmail %s uploadKey %s", sm.uploadEmail, sm.uploadKey)
+	sm.log.Infof("uploadKey %#v", sm.uploadKey)
 
 	now := time.Now()
 	options := &storage.SignedURLOptions{
 		Scheme:         storage.SigningSchemeV4,
 		Method:         "PUT",
-		GoogleAccessID: sm.uploadEmail,
+		GoogleAccessID: sm.uploadKey.ClientEmail,
 		PrivateKey:     []byte(sm.uploadKey.PrivateKey),
 		Expires:        now.Add(10 * time.Minute),
 		Headers: []string{
@@ -370,6 +366,19 @@ func (sm *StorageManager) SetUploadState(ctx context.Context, uploadID string, n
 	}
 
 	return nil
+}
+
+func (sm *StorageManager) GetFileInfo(ctx context.Context, uploadID string) (*File, error) {
+	dbpath := fmt.Sprintf("uploads/%s", uploadID)
+
+	file := &File{}
+
+	err := sm.db.Get(ctx, dbpath, file)
+	if err != nil {
+		return nil, err
+	}
+
+	return file, nil
 }
 
 func (sm *StorageManager) Read(ctx context.Context, objectID string, w http.ResponseWriter) error {
