@@ -94,7 +94,7 @@ type File struct {
 	LastUpdate time.Time
 }
 
-func NewStorageManager(log logger.CompatLogWriter, db *fsdb.DBConnection, downloadEmail string, rawDownloadKey []byte, uploadBucket string, uploadEmail string, rawUploadKey []byte) (*StorageManager, error) {
+func NewStorageManager(log logger.CompatLogWriter, db *fsdb.DBConnection, rawDownloadKey []byte, uploadBucket string, rawUploadKey []byte) (*StorageManager, error) {
 	downloadKey, err := decodeKey(rawDownloadKey)
 	if err != nil {
 		return nil, err
