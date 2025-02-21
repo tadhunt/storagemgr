@@ -390,6 +390,10 @@ func (sm *StorageManager) Read(ctx context.Context, objectID string, w http.Resp
 
 	bucket := client.Bucket(sm.uploadBucket)
 	object := bucket.Object(objectID)
+	attrs, err := object.Attrs(ctx)
+	if err != nil {
+		return err
+	}
 
 	reader, err := object.NewReader(ctx)
 	if err != nil {
@@ -397,6 +401,7 @@ func (sm *StorageManager) Read(ctx context.Context, objectID string, w http.Resp
 	}
 	defer reader.Close()
 
+	w.Header().Set("Content-Type", attrs.ContentType)
 	_, err = io.Copy(w, reader)
 	if err != nil {
 		return sm.log.ErrFmt("stream object %s/%s: %v", sm.uploadBucket, objectID, err)
